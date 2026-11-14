@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kolejka piosenek</title>
+<meta name="description" content="Jeden przycisk puszcza wszystkie piosenki z YouTube po kolei.">
+<meta name="theme-color" content="#2457d6">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Kolejka">
+<style>html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0}[hidden]:not([hidden=until-found i]){display:none!important}</style>
+<style>
+  /* Layout: one narrow column. Play-all button, a paste box for new links, then the editable queue in play order. */
+  :root {
+    --bg: #f2f6fb;
+    --fg: #14233a;
+    --muted: #51627c;
+    --line: #d3deec;
+    --card: #ffffff;
+    --accent: #2457d6;
+    --play: #ffc93c;
+    --play-fg: #2a1d00;
+    --display: ui-rounded, "Arial Rounded MT Bold", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --body: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f1626;
+      --fg: #eaf0fa;
+      --muted: #9fb0cc;
+      --line: #26334d;
+      --card: #172037;
+      --accent: #8aadff;
+      --play: #ffc93c;
+      --play-fg: #2a1d00;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f1626;
+    --fg: #eaf0fa;
+    --muted: #9fb0cc;
+    --line: #26334d;
+    --card: #172037;
+    --accent: #8aadff;
+    --play: #ffc93c;
+    --play-fg: #2a1d00;
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.5;
+    padding-block: 36px 48px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  .wrap { max-width: 560px; margin: 0 auto; display: grid; gap: 28px; }
+  h1 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: clamp(2rem, 8vw, 2.6rem);
+    line-height: 1.1;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .lead { margin: 8px 0 0; color: var(--muted); max-width: 46ch; }
+  .sr {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
+  .play {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    min-height: 84px;
+    padding: 16px 24px;
+    background: var(--play);
+    color: var(--play-fg);
+    border-radius: 999px;
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 1.35rem;
+    text-decoration: none;
+    text-align: center;
+    transition: transform 0.12s ease;
+  }
+  .play:hover { transform: translateY(-2px); }
+  .play svg { flex: none; width: 28px; height: 28px; fill: currentColor; }
+  .play[aria-disabled="true"] { opacity: 0.45; pointer-events: none; }
+
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+
+  h2 {
+    font-family: var(--display);
+    font-weight: 500;
+    font-size: 1.05rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 10px;
+  }
+
+  textarea, input[type="text"] {
+    width: 100%;
+    box-sizing: border-box;
+    font: inherit;
+    color: var(--fg);
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 12px 14px;
+  }
+  textarea { resize: vertical; min-height: 88px; }
+  textarea::placeholder, input::placeholder { color: var(--muted); opacity: 0.85; }
+  .add { display: grid; gap: 12px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .msg { color: var(--muted); font-size: 0.95rem; min-height: 1.4em; flex: 1 1 12ch; }
+
+  button {
+    font: inherit;
+    font-weight: 700;
+    padding: 10px 18px;
+    border-radius: 999px;
+    border: 2px solid var(--accent);
+    background: transparent;
+    color: var(--accent);
+    cursor: pointer;
+  }
+  button:hover { background: var(--accent); color: var(--bg); }
+  button.solid { background: var(--accent); color: var(--bg); }
+  button.solid:hover { filter: brightness(1.08); }
+
+  ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .item {
+    display: grid;
+    grid-template-columns: 34px minmax(0, 1fr);
+    gap: 4px 12px;
+    padding: 14px 16px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+  }
+  .num {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 1.5rem;
+    line-height: 1.9;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+  }
+  .body { min-width: 0; display: grid; gap: 8px; }
+  .title { font-weight: 700; }
+  .id { font-size: 0.82rem; color: var(--muted); overflow-wrap: anywhere; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .mini {
+    padding: 5px 12px;
+    font-size: 0.9rem;
+    border-width: 1.5px;
+  }
+  .mini:disabled { opacity: 0.35; cursor: default; }
+  .mini:disabled:hover { background: transparent; color: var(--accent); }
+  .open { color: var(--accent); font-weight: 700; font-size: 0.9rem; margin-left: auto; white-space: nowrap; }
+  .empty { margin: 0; color: var(--muted); }
+  .listbar { margin-bottom: 12px; }
+
+  .tools { display: grid; gap: 12px; }
+  #status { color: var(--muted); font-size: 0.95rem; min-height: 1.4em; }
+  .tip { margin: 0; color: var(--muted); font-size: 0.95rem; max-width: 52ch; }
+  @media (prefers-reduced-motion: reduce) { .play { transition: none; } .play:hover { transform: none; } }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header>
+    <h1>Kolejka piosenek</h1>
+    <p class="lead">Jeden przycisk włącza wszystkie piosenki z listy po kolei. Kiedy jedna się skończy, YouTube sam puszcza następną.</p>
+  </header>
+
+  <a class="play" id="playAll" href="#" target="_blank" rel="noopener">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>
+    Odtwarzaj wszystkie
+  </a>
+
+  <section aria-labelledby="addTitle">
+    <h2 id="addTitle">Dodaj piosenki</h2>
+    <form class="add" id="addForm">
+      <label class="sr" for="links">Linki do filmów z YouTube</label>
+      <textarea id="links" rows="3" placeholder="Wklej tu jeden lub kilka linków z YouTube, każdy w nowej linii"></textarea>
+      <div class="row">
+        <button type="submit" class="solid">Dodaj do kolejki</button>
+        <span class="msg" id="addMsg" role="status"></span>
+      </div>
+    </form>
+  </section>
+
+  <section aria-labelledby="listTitle">
+    <h2 id="listTitle">Kolejność odtwarzania<span id="count"></span></h2>
+    <div class="row listbar">
+      <button type="button" id="shuffle">Wymieszaj kolejność</button>
+      <span class="msg" id="shuffleMsg" role="status"></span>
+    </div>
+    <ol id="list"></ol>
+    <p class="empty" id="empty" hidden>Kolejka jest pusta. Wklej link powyżej i dodaj piosenkę.</p>
+  </section>
+
+  <section class="tools">
+    <div class="row">
+      <button type="button" id="copy">Kopiuj link do kolejki</button>
+      <span id="status" role="status"></span>
+    </div>
+    <p class="tip">Skopiowany link możesz dodać do zakładek albo na ekran główny telefonu, i wtedy kolejka włączy się jednym dotknięciem. Po zmianach na liście skopiuj link jeszcze raz. Strona nie pobiera tytułów z YouTube, więc nazwy wpisujesz w polach na liście. Lista i nazwy zapisują się w tej przeglądarce i nie przenoszą się na inne urządzenia. Kolejka jest tymczasowa i działa w przeglądarce, a YouTube przyjmuje w niej do 50 filmów.</p>
+  </section>
+</main>
+
+<script>
+  (function () {
+    var KEY = "kolejka-piosenek-v1";
+    var MAX = 50;
+    var defaults = [
+      { id: "eyGah5mKvrs", name: "Piosenka 1" },
+      { id: "ZjU-8e4UzPI", name: "Piosenka 2" },
+      { id: "0IgEMFTTt_8", name: "Piosenka 3" }
+    ];
+
+    var listEl = document.getElementById("list");
+    var emptyEl = document.getElementById("empty");
+    var countEl = document.getElementById("count");
+    var playEl = document.getElementById("playAll");
+    var area = document.getElementById("links");
+    var addMsg = document.getElementById("addMsg");
+    var statusEl = document.getElementById("status");
+
+    var items = load();
+
+    function load() {
+      try {
+        var raw = localStorage.getItem(KEY);
+        if (raw) {
+          var a = JSON.parse(raw);
+          if (Array.isArray(a)) {
+            return a.filter(function (x) {
+              return x && typeof x.id === "string" && /^[A-Za-z0-9_-]{11}$/.test(x.id);
+            }).map(function (x) {
+              return { id: x.id, name: typeof x.name === "string" ? x.name : "" };
+            });
+          }
+        }
+      } catch (e) {}
+      return defaults.map(function (d) { return { id: d.id, name: d.name }; });
+    }
+
+    function save() {
+      try { localStorage.setItem(KEY, JSON.stringify(items)); } catch (e) {}
+    }
+
+    function queueUrl() {
+      return "https://www.youtube.com/watch_videos?video_ids=" +
+        items.map(function (x) { return x.id; }).join(",");
+    }
+
+    function extract(t) {
+      var m = t.match(/(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:watch\?(?:[^#\s]*&)?v=|shorts\/|embed\/|live\/|v\/))([A-Za-z0-9_-]{11})/);
+      return m ? m[1] : null;
+    }
+
+    function mini(label, aria, act, id, disabled, onClick) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "mini";
+      b.textContent = label;
+      b.setAttribute("aria-label", aria);
+      b.setAttribute("data-act", act);
+      b.setAttribute("data-id", id);
+      b.disabled = disabled;
+      b.addEventListener("click", onClick);
+      return b;
+    }
+
+    function render(focusId, focusAct) {
+      listEl.textContent = "";
+      items.forEach(function (it, i) {
+        var li = document.createElement("li");
+        li.className = "item";
+
+        var num = document.createElement("span");
+        num.className = "num";
+        num.textContent = String(i + 1);
+
+        var body = document.createElement("div");
+        body.className = "body";
+
+        var input = document.createElement("input");
+        input.type = "text";
+        input.className = "title";
+        input.id = "name-" + it.id;
+        input.maxLength = 120;
+        input.value = it.name;
+        input.placeholder = "Wpisz tytuł z YouTube";
+        input.setAttribute("aria-label", "Nazwa piosenki numer " + (i + 1));
+        input.addEventListener("input", function () {
+          it.name = input.value;
+          save();
+        });
+
+        var idEl = document.createElement("span");
+        idEl.className = "id";
+        idEl.textContent = it.id;
+
+        var actions = document.createElement("div");
+        actions.className = "actions";
+        actions.appendChild(mini("↑", "Przesuń w górę", "up", it.id, i === 0, function () {
+          swap(i, i - 1, it.id, "up");
+        }));
+        actions.appendChild(mini("↓", "Przesuń w dół", "down", it.id, i === items.length - 1, function () {
+          swap(i, i + 1, it.id, "down");
+        }));
+        actions.appendChild(mini("Usuń", "Usuń z kolejki", "remove", it.id, false, function () {
+          items.splice(i, 1);
+          save();
+          render();
+          addMsg.textContent = "Usunięto z kolejki.";
+        }));
+        var open = document.createElement("a");
+        open.className = "open";
+        open.href = "https://www.youtube.com/watch?v=" + it.id;
+        open.target = "_blank";
+        open.rel = "noopener";
+        open.textContent = "Otwórz ↗";
+        actions.appendChild(open);
+
+        body.appendChild(input);
+        body.appendChild(idEl);
+        body.appendChild(actions);
+        li.appendChild(num);
+        li.appendChild(body);
+        listEl.appendChild(li);
+      });
+
+      var has = items.length > 0;
+      emptyEl.hidden = has;
+      countEl.textContent = has ? " (" + items.length + ")" : "";
+      if (has) {
+        playEl.href = queueUrl();
+        playEl.removeAttribute("aria-disabled");
+      } else {
+        playEl.removeAttribute("href");
+        playEl.setAttribute("aria-disabled", "true");
+      }
+
+      if (focusId) {
+        var target = listEl.querySelector('[data-id="' + focusId + '"][data-act="' + focusAct + '"]');
+        if (target && target.disabled) {
+          target = listEl.querySelector('[data-id="' + focusId + '"][data-act="' + (focusAct === "up" ? "down" : "up") + '"]');
+        }
+        if (target && !target.disabled) target.focus();
+      }
+    }
+
+    function swap(a, b, id, act) {
+      if (b < 0 || b >= items.length) return;
+      var t = items[a]; items[a] = items[b]; items[b] = t;
+      save();
+      render(id, act);
+    }
+
+    document.getElementById("addForm").addEventListener("submit", function (e) {
+      e.preventDefault();
+      var tokens = area.value.split(/[\s,]+/).filter(Boolean);
+      var added = 0, dup = 0, over = 0, bad = 0, found = 0;
+      tokens.forEach(function (t) {
+        var id = extract(t);
+        if (!id) {
+          if (/^https?:|youtu/i.test(t)) bad++;
+          return;
+        }
+        found++;
+        if (items.some(function (x) { return x.id === id; })) { dup++; return; }
+        if (items.length >= MAX) { over++; return; }
+        items.push({ id: id, name: "" });
+        added++;
+      });
+      if (added) {
+        save();
+        render();
+        area.value = "";
+      }
+      var parts = [];
+      if (added) parts.push("Dodano: " + added + ".");
+      if (dup) parts.push("Już w kolejce: " + dup + ".");
+      if (over) parts.push("Limit to " + MAX + " piosenek.");
+      if (bad) parts.push("Nie rozpoznano linków: " + bad + ".");
+      if (!parts.length) {
+        parts.push(area.value.trim() ? "Nie znalazłem w tym tekście linku do YouTube." : "Wklej najpierw link do filmu.");
+      }
+      addMsg.textContent = parts.join(" ");
+    });
+
+    document.getElementById("shuffle").addEventListener("click", function () {
+      var msgEl = document.getElementById("shuffleMsg");
+      if (items.length < 2) {
+        msgEl.textContent = "Do wymieszania potrzebne są co najmniej dwie piosenki.";
+        return;
+      }
+      var key = function () { return items.map(function (x) { return x.id; }).join(","); };
+      var before = key();
+      var tries = 0;
+      do {
+        for (var i = items.length - 1; i > 0; i--) {
+          var j = Math.floor(Math.random() * (i + 1));
+          var t = items[i]; items[i] = items[j]; items[j] = t;
+        }
+        tries++;
+      } while (key() === before && tries < 5);
+      save();
+      render();
+      msgEl.textContent = "Wymieszano. Przycisk „Odtwarzaj wszystkie” puści piosenki w tej kolejności.";
+    });
+
+    document.getElementById("copy").addEventListener("click", function () {
+      if (!items.length) { statusEl.textContent = "Kolejka jest pusta."; return; }
+      var url = queueUrl();
+      var done = function () { statusEl.textContent = "Skopiowano."; };
+      var fail = function () { statusEl.textContent = "Nie udało się skopiować. Przytrzymaj przycisk „Odtwarzaj wszystkie” i skopiuj link."; };
+      try {
+        navigator.clipboard.writeText(url).then(done, fail);
+      } catch (err) {
+        fail();
+      }
+    });
+
+    render();
+  })();
+</script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("sw.js").catch(function () {});
+    });
+  }
+</script>
+</body>
+</html>
